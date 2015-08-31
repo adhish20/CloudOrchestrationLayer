@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 import sys, parse, os, xml, libvirt
+from pymongo import MongoClient
 VMid = 32000
 app = Flask(__name__)
 
@@ -38,18 +39,16 @@ def VMCreate():
             PMNumber = Schedule(VM)
             if PMNumber > 0:
                 os.system("sudo scp "+
-                    images[int(VM['image_id'])]['username']+"@"+
-                    images[int(VM['image_id'])]['hostname']+":"+
                     images[int(VM['image_id'])]['path']+" "+
                     PMs[PMNumber]['username']+"@"+
-                    PMs[PMNumber]['hostname']+":/")
+                    PMs[PMNumber]['hostname']+":/home/"+PMs[PMNumber]['username'])
 
-                path = '/home/phantom/Desktop/'+images[int(VM['image_id'])]['path'].split('/')[-1]
+                path = '/usr/local/'+images[int(VM['image_id'])]['path'].split('/')[-1]
                 global VMid
                 VMid += 1
                 XML = xml.createXML(VMid, VM['name'], vm_types[int(VM['instance_type'])], path)
                 try:
-                    connection = libvirt.open("qemu:///system")
+                    connection = libvirt.open("qemu+ssh://"+PMs[PMNumber]['username']+"@"+PMs[PMNumber]['hostname']+"/system")
                     connection.defineXML(XML)
                     dom = connection.lookupByName(VM['name'])
                     dom.create()
@@ -84,7 +83,7 @@ def VMDestroy():
     args = request.args
     vmid = int(args.get('vmid'))
     try:
-        connection = libvirt.open("qemu:///system")
+        connection = libvirt.open("qemu+ssh://"+PMs[VMs[vmid]['pmid']]['username']+"@"+PMs[VMs[vmid]['pmid']]['hostname']+"/system")
         dom = connection.lookupByName(VMs[vmid]['name'])
         dom.destroy()
         dom.undefine()
@@ -136,6 +135,7 @@ if __name__ == "__main__":
     if len(sys.argv) != 4:
         print "[ERROR] : Incorrect input parameters.\nUsage : $> python main.py pm_file image_file vm_types"
     else:
+        client = MongoClient()
         PMs, PMdetails, pmids, pmvms = parse.parsePMs(sys.argv[1])
         images, imageNames = parse.parseImages(sys.argv[2])
         vm_types = parse.parseVMTypes(sys.argv[3])

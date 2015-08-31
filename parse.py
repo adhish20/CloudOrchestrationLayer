@@ -7,12 +7,10 @@ def parseImages(imFile):
     with open(imFile) as image_file:
         for line in image_file:
             images[ct] = {}
-            images[ct]['username'] = line.split('@')[0]
-            images[ct]['hostname'] = line.split('@')[1].split(':')[0]
-            images[ct]['path'] = line.split('@')[1].split(':')[1].split('\n')[0]
+            images[ct]['path'] = line.split('\n')[0]
             imageNames[ct] = {}
             imageNames[ct]['id'] = ct
-            imageNames[ct]['name'] = line.split('@')[1].split(':')[1].split('\n')[0].split('/')[-1].split('.')[0]
+            imageNames[ct]['name'] = line.split('\n')[0].split('/')[-1].split('.')[0]
             ct = ct + 1
     return (images, imageNames)
 
