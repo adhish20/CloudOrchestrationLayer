@@ -13,7 +13,12 @@ def homepage():
             "URLs" : 
                 {
                     "Create VM" : "http://server/vm/create?name=name&instance_type=type&image_id=id",
+                    "Destroy VM" : "http://server/vm/destroy?vmid=vmid",
+                    "VM Query" : "http://server/vm/query?vmid=vmid",
                     "List VM Types" : "http://server/vm/types",
+                    "Images List" : "http://server/image/list",
+                    "PMs List" : "http://server/pm/list",
+                    "PM List VMs" : "http://server/pm/listvms?pmid=pmid",
                     "PM Query" : "http://server/pm/query?pmid=id"
                 }
         }
@@ -40,23 +45,69 @@ def VMCreate():
                     PMs[PMNumber]['hostname']+":/")
 
                 path = '/home/phantom/Desktop/'+images[int(VM['image_id'])]['path'].split('/')[-1]
-                XML = xml.createXML(VMid, VM['name'], vm_types[int(VM['instance_type'])], path)
-                connection = libvirt.open("qemu:///system")
-                connection.defineXML(XML)
-                dom = connection.lookupByName(VM['name'])
-                dom.create()
+                global VMid
                 VMid += 1
-                return jsonify(PMdetails[PMNumber])
+                XML = xml.createXML(VMid, VM['name'], vm_types[int(VM['instance_type'])], path)
+                try:
+                    connection = libvirt.open("qemu:///system")
+                    connection.defineXML(XML)
+                    dom = connection.lookupByName(VM['name'])
+                    dom.create()
+                    VMs[VMid] = {}
+                    VMs[VMid]['vmid'] = VMid
+                    VMs[VMid]['name'] = VM['name']
+                    VMs[VMid]['instance_type'] = VM['instance_type']
+                    VMs[VMid]['pmid'] = PMNumber
+                    PMdetails[PMNumber]['vms'] += 1
+                    pmvms[PMNumber]['vmids'].append(VMid)
+                    return jsonify({"vmid":VMid})
+                except:
+                    return jsonify({'status' : 0})
             else:
-                return "No such Physical Machine exists"
+                return jsonify({'No such Physical Machine exists' : 0})
         else:
-            return "No such VM Type"
+            return jsonify({'No such VM Type' : 0})
     else:
-        return "No such image"
+        return jsonify({'No such image' : 0})
 
 @app.route("/vm/types", methods=['GET'])
 def VMTypes():
     return jsonify(vm_types)
+
+@app.route("/vm/query", methods=['GET'])
+def VMQuery():
+    args = request.args
+    return jsonify(VMs[int(args.get('vmid'))])
+
+@app.route("/vm/destroy", methods=['GET'])
+def VMDestroy():
+    args = request.args
+    vmid = int(args.get('vmid'))
+    try:
+        connection = libvirt.open("qemu:///system")
+        dom = connection.lookupByName(VMs[vmid]['name'])
+        dom.destroy()
+        dom.undefine()
+        return jsonify({'status' : 1})
+    except:
+        return jsonify({'status' : 0})
+
+@app.route("/image/list", methods=['GET'])
+def ImageList():
+    image = {}
+    image['images'] = []
+    for x,y in imageNames.iteritems():
+        image['images'].append(y)
+    return jsonify(image)
+
+@app.route("/pm/list", methods=['GET'])
+def PMList():
+    return jsonify(pmids)
+
+@app.route("/pm/listvms", methods=['GET'])
+def PMListVMs():
+    args = request.args
+    return jsonify(pmvms[int(args.get('pmid'))])
 
 @app.route("/pm/query", methods=['GET'])
 def PMQuery():
@@ -85,7 +136,8 @@ if __name__ == "__main__":
     if len(sys.argv) != 4:
         print "[ERROR] : Incorrect input parameters.\nUsage : $> python main.py pm_file image_file vm_types"
     else:
-        PMs, PMdetails = parse.parsePMs(sys.argv[1])
-        images = parse.parseImages(sys.argv[2])
+        PMs, PMdetails, pmids, pmvms = parse.parsePMs(sys.argv[1])
+        images, imageNames = parse.parseImages(sys.argv[2])
         vm_types = parse.parseVMTypes(sys.argv[3])
+        VMs = {}
         app.run(debug = True)
