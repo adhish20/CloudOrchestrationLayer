@@ -1,7 +1,6 @@
 from flask import Flask, jsonify, request
 import sys, parse, os, xml, libvirt
 from pymongo import MongoClient
-VMid = 32000
 app = Flask(__name__)
 
 @app.route('/')
@@ -43,9 +42,13 @@ def VMCreate():
                     PMs[PMNumber]['username']+"@"+
                     PMs[PMNumber]['hostname']+":/home/"+PMs[PMNumber]['username'])
 
-                path = '/usr/local/'+images[int(VM['image_id'])]['path'].split('/')[-1]
-                global VMid
-                VMid += 1
+                path = '/home/'+PMs[PMNumber]['username']+'/'+images[int(VM['image_id'])]['path'].split('/')[-1]
+                VMid = 32000
+                ids = []
+                for x in list(db.vm.find()):
+                    ids.append(x['id'])
+                while VMid in ids:
+                    VMid += 1
                 XML = xml.createXML(VMid, VM['name'], vm_types[int(VM['instance_type'])], path)
                 try:
                     connection = libvirt.open("qemu+ssh://"+PMs[PMNumber]['username']+"@"+PMs[PMNumber]['hostname']+"/system")
@@ -57,6 +60,7 @@ def VMCreate():
                     VMs[VMid]['name'] = VM['name']
                     VMs[VMid]['instance_type'] = VM['instance_type']
                     VMs[VMid]['pmid'] = PMNumber
+                    add_vm(VMs[VMid])
                     PMdetails[PMNumber]['vms'] += 1
                     pmvms[PMNumber]['vmids'].append(VMid)
                     return jsonify({"vmid":VMid})
@@ -82,11 +86,15 @@ def VMQuery():
 def VMDestroy():
     args = request.args
     vmid = int(args.get('vmid'))
+    for x in list(db.vm.find()):
+        if x['id'] == vmid:
+            VM = x['VM']
     try:
-        connection = libvirt.open("qemu+ssh://"+PMs[VMs[vmid]['pmid']]['username']+"@"+PMs[VMs[vmid]['pmid']]['hostname']+"/system")
-        dom = connection.lookupByName(VMs[vmid]['name'])
+        connection = libvirt.open("qemu+ssh://"+PMs[VM['pmid']]['username']+"@"+PMs[VM['pmid']]['hostname']+"/system")
+        dom = connection.lookupByName(VM['name'])
         dom.destroy()
         dom.undefine()
+        db.vm.remove({'id' : vmid})
         return jsonify({'status' : 1})
     except:
         return jsonify({'status' : 0})
@@ -111,7 +119,23 @@ def PMListVMs():
 @app.route("/pm/query", methods=['GET'])
 def PMQuery():
     args = request.args
-    return jsonify(PMdetails[int(args.get('pmid'))])
+    pmid = int(args.get('pmid'))
+    path = os.getcwd()
+    path = path + "/data"
+    os.system("ssh "+PMs[pmid]['username']+"@"+PMs[pmid]['hostname']+" free -m | grep 'Mem:' | awk '{print $4}' > data")
+    with open(path) as f:
+        freeram = int(f.readline().rstrip())
+    os.system("ssh "+PMs[pmid]['username']+"@"+PMs[pmid]['hostname']+" free -m | grep 'Mem:' | awk '{print $2}' > data")
+    with open(path) as f:
+        ram = int(f.readline().rstrip())
+    os.system("ssh "+PMs[pmid]['username']+"@"+PMs[pmid]['hostname']+" nproc > data")
+    with open(path) as f:
+        cpu = int(f.readline().rstrip())
+    PMdetails[int(args.get('pmid'))]['capacity']['cpu'] = cpu
+    PMdetails[int(args.get('pmid'))]['free']['cpu'] = cpu
+    PMdetails[int(args.get('pmid'))]['free']['ram'] = freeram
+    PMdetails[int(args.get('pmid'))]['capacity']['ram'] = ram
+    return jsonify(PMdetails[pmid])
 
 @app.errorhandler(404)
 def page_not_found(error):
@@ -123,13 +147,21 @@ def Schedule(VM):
         path = path + "/data"
         os.system("ssh "+y['username']+"@"+y['hostname']+" free -m | grep 'Mem:' | awk '{print $4}' > data")
         with open(path) as f:
-            ram = int(f.readline())
+            ram = int(f.readline().rstrip())
         os.system("ssh "+y['username']+"@"+y['hostname']+" nproc > data")
         with open(path) as f:
-            cpu = int(f.readline())
+            cpu = int(f.readline().rstrip())
         if vm_types[int(VM['instance_type'])]['cpu'] < cpu and vm_types[int(VM['instance_type'])]['ram'] < ram:
             return x
     return 0;
+
+def get_db():
+    client = MongoClient('localhost:27017')
+    db = client.Cloud
+    return db
+
+def add_vm(vm):
+    db.vm.insert({'id' : vm['vmid'], 'VM' : vm})
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
@@ -139,5 +171,6 @@ if __name__ == "__main__":
         PMs, PMdetails, pmids, pmvms = parse.parsePMs(sys.argv[1])
         images, imageNames = parse.parseImages(sys.argv[2])
         vm_types = parse.parseVMTypes(sys.argv[3])
+        db = get_db()
         VMs = {}
         app.run(debug = True)
